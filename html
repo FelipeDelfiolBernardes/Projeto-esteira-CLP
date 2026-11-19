@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Esteira de Separação de Produtos – Simulador CLP</title>
+<style>
+:root{--bg:#f6f5f1;--card:#fff;--tx:#1f1f1c;--mu:#6b6a63;--bd:#d9d7cf;--ok:#1d9e75;--err:#e24b4a;--ac:#378ADD;--b:#ef9f27;--belt:#4a4a46;--sc:#eceae3;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#171716;--card:#232321;--tx:#ecebe5;--mu:#9a988f;--bd:#3a3a37;--belt:#6a6a64;--sc:#1d1d1b;color-scheme:dark}}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--tx);font:15px/1.45 system-ui,-apple-system,"Segoe UI",sans-serif}
+main{max-width:1000px;margin:0 auto;padding:16px}
+h1{font-size:20px;margin:0 0 2px}h2{font-size:15px;margin:0 0 10px}
+.sub{color:var(--mu);font-size:13px;margin-bottom:14px}
+.card{background:var(--card);border:1px solid var(--bd);border-radius:12px;padding:14px;margin-bottom:14px}
+canvas{width:100%;height:auto;display:block;border-radius:8px;background:var(--sc)}
+.row{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button,select{font:inherit;padding:8px 12px;border-radius:8px;border:1px solid var(--bd);background:var(--card);color:var(--tx);cursor:pointer}
+button:hover{border-color:var(--mu)}button:disabled{opacity:.5;cursor:default}
+.go{background:var(--ok);color:#fff;border-color:var(--ok)}.stop{background:#8a6d00;color:#fff;border-color:#8a6d00}.em{background:var(--err);color:#fff;border-color:var(--err)}
+.on{outline:2px solid var(--ok)}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:14px}
+@media(max-width:760px){.grid{grid-template-columns:1fr}}
+.wrap{overflow-x:auto}
+table{border-collapse:collapse;width:100%;font-size:13px}
+th,td{text-align:left;padding:5px 8px;border-bottom:1px solid var(--bd);white-space:nowrap}
+th{color:var(--mu);font-weight:600}
+.led{display:inline-block;width:10px;height:10px;border-radius:50%;background:var(--bd);margin-right:6px}
+.led.t{background:var(--ok)}.led.a{background:var(--err)}
+tr.lit td{background:rgba(29,158,117,.18)}
+.mu{color:var(--mu)}.kpi{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}
+.kpi div{flex:1;min-width:90px;background:var(--sc);border-radius:8px;padding:8px 10px}.kpi b{display:block;font-size:20px}
+</style>
+</head>
+<body>
+<main>
+<h1>Sistema Automatizado de Esteira de Separação de Produtos</h1>
+<div class="sub">Simulador do CLP em Ladder (8 rungs, IEC 61131-3) com ciclo de varredura em tempo real.</div>
+
+<div class="card">
+  <canvas id="cv" width="800" height="250"></canvas>
+  <div class="kpi">
+    <div><span class="mu">Total</span><b id="kT">0</b></div>
+    <div><span class="mu">Tipo A</span><b id="kA">0</b></div>
+    <div><span class="mu">Tipo B</span><b id="kB">0</b></div>
+    <div><span class="mu">Alarme</span><b id="kAl">OFF</b></div>
+  </div>
+</div>
+
+<div class="card">
+  <h2>Painel de comando</h2>
+  <div class="row">
+    <button class="go" id="bLig">B_ligar (NA)</button>
+    <button class="stop" id="bDes">B_desligar (NF)</button>
+    <button class="em" id="bEm">B_emergencia (NF)</button>
+    <button id="bRst">Reset alarme/contadores</button>
+  </div>
+  <div class="row" style="margin-top:10px">
+    <span class="mu">Inserir produto:</span>
+    <button id="pA">Tipo A (0)</button>
+    <button id="pB">Tipo B (1)</button>
+    <button id="pN">Não identificado (2)</button>
+    <span class="mu" style="margin-left:8px">Velocidade:</span>
+    <select id="spd"><option value="1">1x</option><option value="2">2x</option><option value="4">4x</option></select>
+  </div>
+  <div class="mu" style="font-size:12px;margin-top:8px">B_desligar e B_emergencia usam contato NF: ao ser acionado (travado), o rung R001 abre e o motor desliga. Clique novamente para liberar.</div>
+</div>
+
+<div class="grid">
+  <div class="card"><h2>Tabela de I/O (tempo real)</h2><div class="wrap"><table id="io"><thead><tr><th>Variável</th><th>Tipo</th><th>Categoria</th><th>Valor</th></tr></thead><tbody></tbody></table></div></div>
+  <div class="card"><h2>Tabela de rungs</h2><div class="wrap"><table id="rg"><thead><tr><th></th><th>Rung</th><th>Condição</th><th>Ação</th></tr></thead><tbody></tbody></table></div></div>
+</div>
+
+<div class="card">
+  <h2>Teste de validação por lote</h2>
+  <div class="row"><button class="go" id="bTest">Executar lotes (10 A, 10 B, 5 não identificados)</button><span class="mu" id="tSt"></span></div>
+  <div class="wrap" style="margin-top:10px"><table id="tt"><thead><tr><th>Lote</th><th>Itens</th><th>Triagens corretas</th><th>Falhas</th><th>Eficiência</th></tr></thead><tbody><tr><td colspan="5" class="mu">Nenhum teste executado.</td></tr></tbody></table></div>
+</div>
+</main>
+
+<script>
+(function(){
+var cv=document.getElementById('cv'),cx=cv.getContext('2d');
+var SX=170,DA=400,DB=560,EX=740,BY=170,SP=110;
+var V={B_ligar:0,B_desligar:0,B_emergencia:0,Sensor_presenca:0,Sensor_classificacao:0,Motor:0,Desvio_a:0,Desvio_b:0,Alarme:0,Pulso_produto:0,contador_total:0,contador_a:0,contador_b:0};
+var IO=[['B_ligar','Bool','Entrada'],['B_desligar','Bool','Entrada'],['B_emergencia','Bool','Entrada'],['Sensor_presenca','Bool','Entrada'],['Sensor_classificacao','Int','Entrada'],['Motor','Bool','Saída'],['Desvio_a','Bool','Saída'],['Desvio_b','Bool','Saída'],['Alarme','Bool','Saída'],['Pulso_produto','Bool','Memória'],['contador_total','CTU','Contador'],['contador_a','CTU','Contador'],['contador_b','CTU','Contador']];
+var RG=[['R001','B_ligar + B_desligar(NF) + B_emergencia(NF) + Motor(selo)','( ) Motor'],['R002','Sensor_presenca |P| + Motor','Pulso_produto'],['R003','Pulso_produto','CTU contador_total'],['R004','Pulso + [Class == 0]','CTU contador_a'],['R005','Pulso + [Class == 1]','CTU contador_b'],['R006','Pulso + [Class == 0]','(S) Desvio_a'],['R007','Pulso + [Class == 1]','(S) Desvio_b'],['R008','Pulso + Desvio_a(NC) + Desvio_b(NC)','(S) Alarme']];
+var lit=[0,0,0,0,0,0,0,0],prev=0,prods=[],queue=[],uid=0,speed=1,lotRun=null,lig=0;
+var $=function(i){return document.getElementById(i)};
+var ioB=document.querySelector('#io tbody'),rgB=document.querySelector('#rg tbody');
+IO.forEach(function(r){var t=document.createElement('tr');t.innerHTML='<td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td><td></td>';ioB.appendChild(t)});
+RG.forEach(function(r){var t=document.createElement('tr');t.innerHTML='<td><span class="led"></span></td><td>'+r[0]+'</td><td>'+r[1]+'</td><td>'+r[2]+'</td>';rgB.appendChild(t)});
+
+function spawn(type,lot){prods.push({id:uid++,type:type,x:20,y:0,state:'belt',pa:0,pb:0,res:null,lot:lot==null?-1:lot})}
+function scan(now){
+  var nf=!V.B_desligar&&!V.B_emergencia;
+  V.Motor=((V.B_ligar||V.Motor)&&nf)?1:0; if(V.Motor)lit[0]=now+200;
+  var p=null;for(var i=0;i<prods.length;i++){if(prods[i].state==='belt'&&Math.abs(prods[i].x-SX)<9){p=prods[i];break}}
+  V.Sensor_presenca=p?1:0;V.Sensor_classificacao=p?p.type:0;
+  V.Pulso_produto=(V.Sensor_presenca&&!prev&&V.Motor)?1:0;prev=V.Sensor_presenca;
+  if(V.Pulso_produto){
+    lit[1]=lit[2]=now+400;V.contador_total++;
+    var c=V.Sensor_classificacao;
+    if(c===0){V.contador_a++;V.Desvio_a=1;lit[3]=lit[5]=now+400}
+    if(c===1){V.contador_b++;V.Desvio_b=1;lit[4]=lit[6]=now+400}
+    if(!V.Desvio_a&&!V.Desvio_b){V.Alarme=1;lit[7]=now+600}
+  }
+}
+function physics(dt){
+  if(queue.length){var free=true;prods.forEach(function(p){if(p.state==='belt'&&p.x<90)free=false});
+    if(free){var q=queue.shift();spawn(q.t,q.l)}}
+  prods.forEach(function(p){
+    if(p.state==='belt'&&V.Motor){
+      p.x+=SP*speed*dt;
+      if(!p.pa&&p.x>=DA){p.pa=1;if(p.type===0&&V.Desvio_a){p.state='dA';p.res='A';V.Desvio_a=0;} }
+      if(p.state==='belt'&&!p.pb&&p.x>=DB){p.pb=1;if(p.type===1&&V.Desvio_b){p.state='dB';p.res='B';V.Desvio_b=0;} }
+      if(p.state==='belt'&&p.x>=EX){p.state='end';p.res=(p.type===2&&V.Alarme)?'N':'ERR';p.t=0}
+    } else if(p.state==='dA'||p.state==='dB'){p.y+=SP*speed*dt*1.1;if(p.y>70)p.state='gone'}
+    else if(p.state==='end'){p.t+=dt*speed;if(p.t>1.2)p.state='gone'}
+  });
+  prods=prods.filter(function(p){return p.state!=='gone'||p.lot>=0});
+  prods=prods.filter(function(p){return !(p.state==='gone'&&p.lot<0)});
+}
+function css(n){return getComputedStyle(document.documentElement).getPropertyValue(n).trim()}
+function draw(){
+  var tx=css('--tx'),mu=css('--mu'),bd=css('--bd'),ok=css('--ok'),er=css('--err'),belt=css('--belt');
+  cx.clearRect(0,0,800,250);cx.font='12px system-ui,sans-serif';cx.textAlign='center';
+  // bins
+  [[DA,'Caixa A',V.contador_a,css('--ac')],[DB,'Caixa B',V.contador_b,css('--b')]].forEach(function(b){cx.strokeStyle=b[3];cx.lineWidth=2;cx.strokeRect(b[0]-35,20,70,50);cx.fillStyle=tx;cx.fillText(b[1],b[0],38);cx.fillText(b[2]+' un',b[0],56)});
+  cx.strokeStyle=er;cx.strokeRect(EX-5,BY-10,45,45);
+  // belt
+  cx.fillStyle=belt;cx.fillRect(10,BY+14,EX+20,16);
+  cx.fillStyle=mu;for(var x=14+((V.Motor?performance.now()*SP*speed/1000:0)%24);x<EX+28;x+=24)cx.fillRect(x,BY+20,10,4);
+  // sensor
+  cx.strokeStyle=V.Sensor_presenca?ok:bd;cx.lineWidth=2;cx.setLineDash([4,3]);cx.beginPath();cx.moveTo(SX,BY-60);cx.lineTo(SX,BY+14);cx.stroke();cx.setLineDash([]);
+  cx.fillStyle=V.Sensor_presenca?ok:mu;cx.fillRect(SX-8,BY-68,16,8);cx.fillStyle=tx;cx.fillText('Sensor',SX,BY-76);
+  // diverters
+  [[DA,V.Desvio_a,css('--ac'),'Desvio_a'],[DB,V.Desvio_b,css('--b'),'Desvio_b']].forEach(function(d){
+    cx.strokeStyle=d[1]?d[2]:mu;cx.lineWidth=5;cx.lineCap='round';cx.beginPath();
+    if(d[1]){cx.moveTo(d[0]-22,BY+10);cx.lineTo(d[0]+10,BY-30)}else{cx.moveTo(d[0]-22,BY-30);cx.lineTo(d[0]+14,BY-30)}
+    cx.stroke();cx.fillStyle=d[1]?d[2]:mu;cx.fillText(d[3]+(d[1]?' ON':''),d[0],BY+52)});
+  cx.fillStyle=V.Alarme?er:mu;cx.fillText(V.Alarme?'ALARME':'Rejeito',EX+17,BY+52);
+  // motor lamp
+  cx.fillStyle=V.Motor?ok:bd;cx.beginPath();cx.arc(24,24,8,0,7);cx.fill();cx.fillStyle=tx;cx.textAlign='left';cx.fillText('Motor',38,28);cx.textAlign='center';
+  // products
+  prods.forEach(function(p){
+    if(p.state==='gone')return;var col=p.type===0?css('--ac'):p.type===1?css('--b'):er;
+    cx.fillStyle=col;cx.fillRect(p.x-10,BY-8-p.y,20,20);cx.fillStyle='#fff';cx.fillText(p.type===2?'?':p.type===0?'A':'B',p.x,BY+6-p.y)});
+}
+function ui(now){
+  var rows=ioB.children;IO.forEach(function(r,i){var v=V[r[0]];rows[i].lastChild.textContent=(r[1]==='Bool')?(v?'TRUE':'FALSE'):v});
+  var rr=rgB.children;for(var i=0;i<8;i++){var on=lit[i]>now;rr[i].className=on?'lit':'';rr[i].firstChild.firstChild.className='led'+(on?' t':'')}
+  $('kT').textContent=V.contador_total;$('kA').textContent=V.contador_a;$('kB').textContent=V.contador_b;$('kAl').textContent=V.Alarme?'ON':'OFF';$('kAl').style.color=V.Alarme?css('--err'):'';
+  $('bDes').classList.toggle('on',!!V.B_desligar);$('bEm').classList.toggle('on',!!V.B_emergencia);
+}
+var last=performance.now();
+setInterval(function(){var n=performance.now(),dt=(n-last)/1000;last=n;scan(n);physics(dt);if(V.B_ligar&&lig&&n>lig){V.B_ligar=0;lig=0}draw();ui(n);checkLot()},40);
+
+$('bLig').onclick=function(){V.B_ligar=1;lig=performance.now()+250};
+$('bDes').onclick=function(){V.B_desligar=V.B_desligar?0:1};
+$('bEm').onclick=function(){V.B_emergencia=V.B_emergencia?0:1};
+$('bRst').onclick=function(){V.Alarme=0;V.Desvio_a=V.Desvio_b=0;V.contador_total=V.contador_a=V.contador_b=0};
+$('pA').onclick=function(){queue.push({t:0,l:-1})};
+$('pB').onclick=function(){queue.push({t:1,l:-1})};
+$('pN').onclick=function(){queue.push({t:2,l:-1})};
+$('spd').onchange=function(){speed=+this.value};
+
+var LOTS=[['Lote 01 (Tipo A)',0,10],['Lote 02 (Tipo B)',1,10],['Lote 03 (Não identificado)',2,5]];
+var recs=[];
+$('bTest').onclick=function(){
+  prods=[];queue=[];$('bRst').onclick();V.B_desligar=V.B_emergencia=0;
+  $('bLig').onclick();speed=4;$('spd').value='4';
+  recs=[];LOTS.forEach(function(l,i){for(var k=0;k<l[2];k++){var r={lot:i,type:l[1],done:false,ok:false};recs.push(r);queue.push({t:l[1],l:recs.length-1})}});
+  lotRun=true;$('bTest').disabled=true;$('tSt').textContent='Executando...';
+};
+function checkLot(){
+  if(!lotRun)return;
+  prods.forEach(function(p){if(p.lot>=0&&p.res&&!recs[p.lot].done){var r=recs[p.lot];r.done=true;r.ok=(p.type===0&&p.res==='A')||(p.type===1&&p.res==='B')||(p.type===2&&p.res==='N')}});
+  if(recs.every(function(r){return r.done})){
+    lotRun=false;$('bTest').disabled=false;$('tSt').textContent='Concluído.';
+    var h='',tot=0,okT=0;
+    LOTS.forEach(function(l,i){var rs=recs.filter(function(r){return r.lot===i}),o=rs.filter(function(r){return r.ok}).length;tot+=rs.length;okT+=o;
+      h+='<tr><td>'+l[0]+'</td><td>'+rs.length+'</td><td>'+o+(l[1]===2?' (alarme)':'')+'</td><td>'+(rs.length-o)+'</td><td>'+Math.round(100*o/rs.length)+'%</td></tr>'});
+    h+='<tr><td><b>Total</b></td><td><b>'+tot+'</b></td><td><b>'+okT+'</b></td><td><b>'+(tot-okT)+'</b></td><td><b>'+Math.round(100*okT/tot)+'%</b></td></tr>';
+    document.querySelector('#tt tbody').innerHTML=h;
+  }
+}
+})();
+</script>
+</body>
+</html>
